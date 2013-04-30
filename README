@@ -1,1 +1,11 @@
-A music player for linux.
+Melodia is music player for linux. It provides these APIs for plugin extensions: 
+
+*access the play progress
+
+*modify the play list
+
+*make a custom interface
+
+*control the play status (haven't been achieved in current version)
+
+The default plugins provided by developers is Lyric Shows and DoubanFm Plugin.
