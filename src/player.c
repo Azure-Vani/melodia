@@ -15,6 +15,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/wait.h>
 
 #define SDL_AUDIO_BUFFER_SIZE 1024
 
@@ -34,6 +35,11 @@ typedef struct AudioParams {
 	enum AVSampleFormat fmt;
 } AudioParams;
 
+typedef struct File {
+	FILE *fp;
+	long long filesize, pos;
+} File;
+
 typedef struct State {
 	int audioStream;
 	PacketQueue audioq;
@@ -41,7 +47,7 @@ typedef struct State {
 	AVFormatContext *format_ctx;
 	AudioParams audio_src, audio_tgt;
 	AVStream *audio_st;
-	AVPacket audio_pkt;
+	AVPacket audio_pkt, audio_pkt1;
 	AVFrame audio_frame1;
 	struct SwrContext *swr_ctx;
 	uint8_t audio_buf[(AVCODEC_MAX_AUDIO_FRAME_SIZE * 3) / 2];
@@ -50,15 +56,23 @@ typedef struct State {
 	uint8_t *audio_buf1;
 	unsigned int audio_buf1_size;
 	double audio_clock;
+	double audio_clock_drift;
+	File *file;
 	int paused;
 	int quit;
+	int buffering;
 } State;
 
 const char *socket_addr = "./socket";
 
 void sigterm_handler(int sig) {
 	unlink(socket_addr);
-	exit(123);
+	exit(0);
+}
+
+void sigchld_handler(int sig) {
+	int stat;
+	while (waitpid(-1, &stat, WNOHANG) > 0);
 }
 
 void packet_queue_init(PacketQueue *q) {
@@ -126,26 +140,24 @@ int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block) {
 
 int audio_decode_frame(State *is) {
 
-	AVPacket pkt_tmp;
 	int64_t dec_channel_layout;
 	int len1, len2, data_size = 0;
 
-	memset(&pkt_tmp, 0, sizeof(pkt_tmp));
-
 	for (;;) {
-		while (pkt_tmp.size > 0) {
-			if (is->paused)
-				return -1;
+		if (is->paused)
+			return -1;
+
+		while (is->audio_pkt1.size > 0) {
 
 			int got_frame = 0;
-			len1 = avcodec_decode_audio4(is->codec_ctx, &is->audio_frame1, &got_frame, &pkt_tmp);
+			len1 = avcodec_decode_audio4(is->codec_ctx, &is->audio_frame1, &got_frame, &is->audio_pkt1);
 			if (len1 < 0) {
 				/* if error, skip frame */
-				pkt_tmp.size = 0;
+				is->audio_pkt1.size = 0;
 				break;
 			}
-			pkt_tmp.data += len1;
-			pkt_tmp.size -= len1;
+			is->audio_pkt1.data += len1;
+			is->audio_pkt1.size -= len1;
 			if (got_frame) {
 				dec_channel_layout =
 					(is->audio_frame1.channel_layout && av_frame_get_channels(&is->audio_frame1) == av_get_channel_layout_nb_channels(is->audio_frame1.channel_layout)) ?
@@ -197,7 +209,10 @@ int audio_decode_frame(State *is) {
 
 		if (packet_queue_get(&is->audioq, &is->audio_pkt, 1) < 0)
 			return -1;
-		pkt_tmp = is->audio_pkt;
+		is->audio_pkt1 = is->audio_pkt;
+
+		if (is->audio_pkt.pts != AV_NOPTS_VALUE)
+			is->audio_clock = av_q2d(is->audio_st->time_base) * is->audio_pkt.pts;
 	}
 }
 
@@ -205,6 +220,7 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
 
 	State *is = (State *)userdata;
 	int len1, audio_size;
+	double now = av_gettime() / 1000000.0;
 
 	while (len > 0) {
 		if (is->audio_buf_index >= is->audio_buf_size) {
@@ -226,45 +242,53 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
 		stream += len1;
 		is->audio_buf_index += len1;
 	}
+
+	is->audio_clock_drift = is->audio_clock - now;
 }
 
 int readfunc(void *ptr, uint8_t *buf, int bufsize) {
-	FILE *fp = ptr;
-	size_t num = fread(buf, 1, bufsize, fp);
+	File *file = ptr;
+	size_t num = fread(buf, 1, bufsize, file->fp);
+	file->pos += num;
 	return num;
 }
 
 int64_t seekfunc(void *ptr, int64_t pos, int whence) {
-	FILE *fp = ptr;
-	if (whence == AVSEEK_SIZE) {
-		long pos = ftell(fp);
-		fseek(fp, 0, SEEK_END);
-		long size = ftell(fp);
-		fseek(fp, pos, SEEK_SET);
-		return size;
-	}
-	return -1;
-	/*
-	int ret = fseek(fp, pos, whence);
-	return ret;
-	*/
+	File *file = ptr;
+	if (whence == AVSEEK_SIZE) return file->filesize;
+	else return -1;
 }
 
 int read_thread(void *arg) {
 	AVPacket packet;
 	State *is = arg;
+	int ret;
 
 	// Read frames
-	while (av_read_frame(is->format_ctx, &packet) >= 0) {
+	while (1) {
+		if (is->quit) break;
+
+		if (is->audioq.nb_packets > 5) {
+			av_usleep(0.01 * 1000000);
+			continue;
+		}
+
+		ret = av_read_frame(is->format_ctx, &packet);
+		if (ret < 0) {
+			if (is->file->pos == is->file->filesize)
+				break;
+			else {
+				av_usleep(0.01 * 1000000);
+				continue;
+			}
+		}
+
 		if (packet.stream_index == is->audioStream)
 			packet_queue_put(&is->audioq, &packet);
 		else
 			av_free_packet(&packet);
 		// Free the packet that was allocated by av_read_frame
 	}
-
-	while (! is->quit)
-		av_usleep(0.01 * 1000000);
 
 	return 0;
 }
@@ -275,13 +299,15 @@ int handle(int fd) {
 	AVIOContext* io_ctx;
 	AVCodec *codec = NULL;
 	SDL_Thread *read_tid;
-	SDL_Event event;
 	SDL_AudioSpec wanted_spec, spec;
-	FILE *fp;
+
 	const int bufsize = 32 * 1024;
 	unsigned char *buf;
-	char fnbuf[100];
+	char socket_buf[100];
+	fd_set readfds;
+	struct timeval timeout;
 	int i;
+	ssize_t nbytes;
 
 	is = (State *)malloc(sizeof(State));
 	buf = malloc(bufsize);
@@ -294,10 +320,14 @@ int handle(int fd) {
 		exit(1);
 	}
 
-	read(fd, fnbuf, 100);
-	fp = fopen(fnbuf, "r");
+	nbytes = read(fd, socket_buf, 100); socket_buf[nbytes] = 0;
+	is->file = malloc(sizeof(File));
+	is->file->fp = fopen(socket_buf, "r");
+	nbytes = read(fd, socket_buf, 100); socket_buf[nbytes] = 0;
+	sscanf(socket_buf, "%lld", &is->file->filesize);
+	is->file->pos = 0;
 
-	io_ctx = avio_alloc_context(buf, bufsize, 0, fp, readfunc, NULL, seekfunc);
+	io_ctx = avio_alloc_context(buf, bufsize, 0, is->file, readfunc, NULL, seekfunc);
 	is->format_ctx = avformat_alloc_context();
 
 	probeData.buf = buf;
@@ -317,7 +347,7 @@ int handle(int fd) {
 		return -1; // Couldn't find stream information
 
 	// Dump information about file onto standard error
-	//av_dump_format(is->format_ctx, 0, fnbuf, 0);
+	//av_dump_format(is->format_ctx, 0, socket_buf, 0);
 
 	// Find the first video stream
 	is->audioStream=-1;
@@ -362,26 +392,56 @@ int handle(int fd) {
 
 	packet_queue_init(&is->audioq);
 	SDL_PauseAudio(0);
+	is->audio_clock = 0;
+	is->audio_clock_drift = -av_gettime() / 1000000.0;
 
 	if (! (read_tid = SDL_CreateThread(read_thread, is))) {
 		fprintf(stderr, "Cannot create thread!\n");
 		return -1;
 	}
 
-	int64_t now = av_gettime();
+	sprintf(socket_buf, "%d", (int) (is->format_ctx->duration / 1000000));
+	write(fd, socket_buf, strlen(socket_buf));
+
+	int seconds = 0;
+	av_usleep(0.01 * 1000000);
 	while (! is->quit) {
-		SDL_PollEvent(&event);
-		switch (event.type) {
-			case SDL_QUIT:
-				is->quit = 1;
-				break;
-			default:
-				break;
+
+		if (! is->buffering && is->audioq.size == 0 && is->file->pos < is->file->filesize) {
+			is->buffering = 1;
+			strcpy(socket_buf, "BUFFERING");
+			write(fd, socket_buf, strlen(socket_buf));
 		}
-		
-		if (av_gettime() - now >= is->format_ctx->duration) break;
-		av_usleep(0.01 * 1000000);
+		if (is->audioq.size > 0 && is->buffering) {
+			is->buffering = 0;
+			strcpy(socket_buf, "RESUME");
+			write(fd, socket_buf, strlen(socket_buf));
+		}
+
+		if (! is->paused && ! is->buffering) {
+			double cur_clock = is->audio_clock_drift + av_gettime() / 1000000.0;
+			if (cur_clock * 1000000 >= is->format_ctx->duration) break;
+			if ((int) cur_clock > seconds) {
+				seconds = cur_clock;
+				sprintf(socket_buf, "%d", seconds);
+				write(fd, socket_buf, strlen(socket_buf));
+			}
+		}
+
+		FD_ZERO(&readfds);
+		FD_SET(fd, &readfds);
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 0.01 * 1000000;
+		if (select(fd + 1, &readfds, NULL, NULL, &timeout) > 0) {
+			nbytes = read(fd, socket_buf, 100); socket_buf[nbytes] = 0;
+			if (strcmp(socket_buf, "PAUSE") == 0) is->paused = 1;
+			else if (strcmp(socket_buf, "RESUME") == 0) is->paused = 0;
+			else if (strcmp(socket_buf, "QUIT") == 0) is->quit = 1;
+		}
 	}
+
+	strcpy(socket_buf, "QUIT");
+	write(fd, socket_buf, strlen(socket_buf));
 
 	is->quit = 1;
 	is->audioq.quit = 1;
@@ -399,7 +459,8 @@ int handle(int fd) {
 	SDL_Quit();
 
 	// Close the video file
-	fclose(fp);
+	fclose(is->file->fp);
+	free(is->file);
 	avformat_close_input(&is->format_ctx);
 	swr_free(&is->swr_ctx);
 	if (is->audio_buf1) av_free(is->audio_buf1);
@@ -413,18 +474,22 @@ int main() {
 	struct sockaddr_un addr;
 	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, socket_addr);
-	
+
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	bind(fd, (struct sockaddr *) &addr, sizeof(addr));
 	listen(fd, 5);
 
 	signal(SIGINT, sigterm_handler);
 	signal(SIGTERM, sigterm_handler);
+	signal(SIGCHLD, sigchld_handler);
 
 	int client;
+
 	while ((client = accept(fd, NULL, NULL)) >= 0)
-		if (fork() == 0)
+		if (fork() == 0) {
 			handle(client);
+			return 0;
+		}
 
 	return 0;
 }
