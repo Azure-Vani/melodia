@@ -5,10 +5,6 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_thread.h>
 
-#ifdef __MINGW32__
-#undef main /* Prevents SDL from overriding main() */
-#endif
-
 #include <stdio.h>
 #include <time.h>
 #include <sys/socket.h>
