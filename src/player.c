@@ -1,9 +1,13 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswresample/swresample.h>
 
-#include <SDL/SDL.h>
-#include <SDL/SDL_thread.h>
+#include "SDL.h"
+#include "SDL_thread.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -59,7 +63,7 @@ typedef struct State {
 	int buffering;
 } State;
 
-const char *socket_addr = "./socket";
+const char *socket_addr = "/tmp/melodia-socket";
 
 void sigterm_handler(int sig) {
 	unlink(socket_addr);
@@ -296,10 +300,11 @@ int handle(int fd) {
 	AVCodec *codec = NULL;
 	SDL_Thread *read_tid;
 	SDL_AudioSpec wanted_spec, spec;
+	AVDictionaryEntry *item = NULL;
 
 	const int bufsize = 32 * 1024;
 	unsigned char *buf;
-	char socket_buf[100];
+	char socket_buf[100], *pos;
 	fd_set readfds;
 	struct timeval timeout;
 	int i;
@@ -316,10 +321,17 @@ int handle(int fd) {
 		exit(1);
 	}
 
-	nbytes = read(fd, socket_buf, 100); socket_buf[nbytes] = 0;
+	if ((nbytes = read(fd, socket_buf, 100)) < 0)
+		return -1;
+	socket_buf[nbytes] = 0;
 	is->file = malloc(sizeof(File));
 	is->file->fp = fopen(socket_buf, "r");
-	nbytes = read(fd, socket_buf, 100); socket_buf[nbytes] = 0;
+	if (is->file->fp == NULL)
+		return -1;
+
+	if ((nbytes = read(fd, socket_buf, 100)) < 0)
+		return -1;
+	socket_buf[nbytes] = 0;
 	sscanf(socket_buf, "%lld", &is->file->filesize);
 	is->file->pos = 0;
 
@@ -341,9 +353,6 @@ int handle(int fd) {
 	// Retrieve stream information
 	if (avformat_find_stream_info(is->format_ctx, NULL) < 0)
 		return -1; // Couldn't find stream information
-
-	// Dump information about file onto standard error
-	//av_dump_format(is->format_ctx, 0, socket_buf, 0);
 
 	// Find the first video stream
 	is->audioStream=-1;
@@ -396,8 +405,12 @@ int handle(int fd) {
 		return -1;
 	}
 
-	sprintf(socket_buf, "%d", (int) (is->format_ctx->duration / 1000000));
-	write(fd, socket_buf, strlen(socket_buf));
+	pos = socket_buf;
+	pos += sprintf(pos, "%d", (int) (is->format_ctx->duration / 1000000));
+	while (item = av_dict_get(is->format_ctx->metadata, "", item, AV_DICT_IGNORE_SUFFIX))
+		if (strcmp(item->key, "artist") == 0 || strcmp(item->key, "album") == 0 || strcmp(item->key, "title") == 0)
+			pos += sprintf(pos, "\1%s\2%s", item->key, item->value);
+	write(fd, socket_buf, pos - socket_buf);
 
 	int seconds = 0;
 	av_usleep(0.01 * 1000000);
@@ -429,10 +442,14 @@ int handle(int fd) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 0.01 * 1000000;
 		if (select(fd + 1, &readfds, NULL, NULL, &timeout) > 0) {
-			nbytes = read(fd, socket_buf, 100); socket_buf[nbytes] = 0;
-			if (strcmp(socket_buf, "PAUSE") == 0) is->paused = 1;
-			else if (strcmp(socket_buf, "RESUME") == 0) is->paused = 0;
-			else if (strcmp(socket_buf, "QUIT") == 0) is->quit = 1;
+			if ((nbytes = read(fd, socket_buf, 100)) < 0)
+				is->quit = 1;
+			else {
+				socket_buf[nbytes] = 0;
+				if (strcmp(socket_buf, "PAUSE") == 0) is->paused = 1;
+				else if (strcmp(socket_buf, "RESUME") == 0) is->paused = 0;
+				else if (strcmp(socket_buf, "QUIT") == 0) is->quit = 1;
+			}
 		}
 	}
 
@@ -463,6 +480,8 @@ int handle(int fd) {
 	av_free(io_ctx);
 	free(is);
 
+	close(fd);
+
 	return 0;
 }
 
@@ -472,8 +491,12 @@ int main() {
 	strcpy(addr.sun_path, socket_addr);
 
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	bind(fd, (struct sockaddr *) &addr, sizeof(addr));
-	listen(fd, 5);
+	if (fd < 0)
+		return -1;
+	if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0)
+		return -1;
+	if (listen(fd, 5) < 0)
+		return -1;
 
 	signal(SIGINT, sigterm_handler);
 	signal(SIGTERM, sigterm_handler);

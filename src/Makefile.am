@@ -1,2 +1,2 @@
-bin_PROGRAMS = player
-player_SOURCES = player.c
+bin_PROGRAMS = melodia-daemon
+melodia_daemon_SOURCES = player.c
