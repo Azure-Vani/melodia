@@ -59,27 +59,45 @@ class InterfaceHandler:
 		fileDialog.destroy()
 	
 	def connectServer(self, widget, data):
+		global interface
+		if data == "PAUSE":
+			interface.getObject('Pause').set_label('Resume')
+			interface.getObject('Pause').disconnect(interface.pauseSig)
+			interface.resumeSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "RESUME")
+		if data == "RESUME":
+			interface.getObject('Pause').set_label('Pause')
+			interface.getObject('Pause').disconnect(interface.resumeSig)
+			interface.pauseSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
 		print "Received a %s signal." % (data)
 
 class MainInterface:
+	def getObject(self, data):
+		return self.builder.get_object(data)
+
 	def setSpecialCalls(self):
-		self.builder.get_object('Prev').connect('clicked', InterfaceHandler().connectServer, "PREV")
-		self.builder.get_object('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
-		self.builder.get_object('Stop').connect('clicked', InterfaceHandler().connectServer, "STOP")
-		self.builder.get_object('Next').connect('clicked', InterfaceHandler().connectServer, "NEXT")
+		self.getObject('Prev').connect('clicked', InterfaceHandler().connectServer, "PREV")
+		self.pauseSig = self.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
+		self.getObject('Stop').connect('clicked', InterfaceHandler().connectServer, "STOP")
+		self.getObject('Next').connect('clicked', InterfaceHandler().connectServer, "NEXT")
+
+	def showTime(self):
+		self.getObject('timeLabel').set_text("%d:%02d/%d:%02d"%(self.nowTimeMin, self.nowTimeSec, self.totTimeMin, self.totTimeSec))
 
 	def setTime(self):
 		self.nowTimeSec += 1
 		if self.nowTimeSec == 60:
 			self.nowTimeSec = 1
 			self.nowTimeMin += 1
-		self.builder.get_object('timeLabel').set_text("%d:%02d/3:28"%(self.nowTimeMin, self.nowTimeSec))
+		tmp = (self.nowTimeMin * 60.0 + self.nowTimeSec) / (self.totTimeMin * 60.0 + self.totTimeSec) * 100.0
+		self.getObject('scale').set_value(tmp)
+		self.showTime()
 		return True
 
 	def setSpecialWidget(self):
-		self.builder.get_object('scale').set_value_pos(1.0)
-		self.builder.get_object('timeLabel').set_text("0:00/3:28")
-		GObject.timeout_add(1000, self.setTime)
+		self.showTime()
+		self.getObject('scale').set_sensitive(False)
+		self.getObject('Stop').set_sensitive(False)
+		GObject.timeout_add(950, self.setTime)
 
 	def __init__(self):
 		# analyze the XML file
@@ -88,12 +106,14 @@ class MainInterface:
 
 		self.nowTimeSec = 0
 		self.nowTimeMin = 0
+		self.totTimeSec = 28
+		self.totTimeMin = 3
 
 		self.setSpecialCalls()
 		self.setSpecialWidget()
 		self.builder.connect_signals(InterfaceHandler())
 
-		self.window = self.builder.get_object('MainWindow')
+		self.window = self.getObject('MainWindow')
 		self.window.show_all()
 
 def run():
