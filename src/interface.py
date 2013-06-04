@@ -1,20 +1,43 @@
-#!/usr/bin/python2
+#!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-import pygtk
-pygtk.require('2.0')
-import gtk
-
 import socket
+import time
+from gi.repository import GObject
+from gi.repository import Gtk
 
-def sendSignal(widget, signal):
-	print signal, "recieved."
-	return None
+class _Song:
+	def __init__(self, info):
+		self.totalTime = info["time"]
+		self.artist = info["artist"]
+		self.album = info["album"]
 
-class MainWindow:
+class PlayList:
+	def __init__(self):
+		self.List = []
+		self.SHUFFLE = 1
+		self.LOOP = 0
+		self.palyType = self.LOOP
+	
+	def append(self, data):
+		self.List.append(data)
+		# debug
+		print "Current play list is", self.List
 
-	def AboutInfo(self, widget):
-		aboutDialog = gtk.AboutDialog()
+	def getNext(self):
+		return self.List.pop(0)
+
+class _Socket:
+	def Send(data):
+		print data
+
+class InterfaceHandler:
+	def closeAll(self, *res):
+		Gtk.main_quit()
+
+	def aboutDialog(self, *res):
+		# create about info dialog
+		aboutDialog = Gtk.AboutDialog()
 		aboutDialog.set_program_name("Melodia")
 		aboutDialog.set_comments("A music player for Linux")
 		aboutDialog.set_version("0.1")
@@ -25,104 +48,60 @@ class MainWindow:
 		aboutDialog.run()
 		aboutDialog.destroy()
 
-	def initWindow(self):
-		# Initialize main window
-		self.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
-		self.window.set_title("Melodia")
-		self.window.set_size_request(500, 70)
-		self.window.set_position(gtk.WIN_POS_CENTER)
-		self.window.connect("delete_event", gtk.main_quit)	
+	def fileChooser(self, widget):
+		# create file chooser dialog
+		fileDialog = Gtk.FileChooserDialog("Open..", widget, Gtk.FileChooserAction.OPEN, (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+		fileDialog.set_default_response(Gtk.ResponseType.OK)
+		res = fileDialog.run()
+		if res == Gtk.ResponseType.OK:
+			fileName = fileDialog.get_filename()
+			playList.append(fileName)
+		fileDialog.destroy()
+	
+	def connectServer(self, widget, data):
+		print "Received a %s signal." % (data)
 
-	def createMenu(self):
-		# Create Menu
-		self.mb = gtk.MenuBar()
-		self.fileMenu = gtk.Menu()
-		self.editMenu = gtk.Menu()
-		self.viewMenu = gtk.Menu()
-		self.helpMenu = gtk.Menu()
+class MainInterface:
+	def setSpecialCalls(self):
+		self.builder.get_object('Prev').connect('clicked', InterfaceHandler().connectServer, "PREV")
+		self.builder.get_object('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
+		self.builder.get_object('Stop').connect('clicked', InterfaceHandler().connectServer, "STOP")
+		self.builder.get_object('Next').connect('clicked', InterfaceHandler().connectServer, "NEXT")
 
-		# Create Menu Item
-		self.File = gtk.MenuItem('File')
-		self.Edit = gtk.MenuItem('Edit')
-		self.View = gtk.MenuItem('View')
-		self.Help = gtk.MenuItem('Help')
-		self.File.set_submenu(self.fileMenu)
-		self.Edit.set_submenu(self.editMenu)
-		self.View.set_submenu(self.viewMenu)
-		self.Help.set_submenu(self.helpMenu)
+	def setTime(self):
+		self.nowTimeSec += 1
+		if self.nowTimeSec == 60:
+			self.nowTimeSec = 1
+			self.nowTimeMin += 1
+		self.builder.get_object('timeLabel').set_text("%d:%02d/3:28"%(self.nowTimeMin, self.nowTimeSec))
+		return True
 
-		# Add Menu Item
-		self.openFile = gtk.MenuItem('Open...')
-		self.openFolder = gtk.MenuItem('Open Folder...')
-		self.Exit = gtk.MenuItem('Exit')
-		self.Exit.connect('activate', gtk.main_quit)
-		self.fileMenu.append(self.openFile)
-		self.fileMenu.append(self.openFolder)
-		self.fileMenu.append(gtk.SeparatorMenuItem())
-		self.fileMenu.append(self.Exit)
-
-		self.loopPlay = gtk.RadioMenuItem(None, 'Loop Play')
-		self.loopPlay.set_active(True)
-		self.shufflePlay = gtk.RadioMenuItem(self.loopPlay, 'Shuffle Play')
-		self.preference = gtk.MenuItem('Preferences...')
-		self.editMenu.append(self.loopPlay)
-		self.editMenu.append(self.shufflePlay)
-		self.editMenu.append(gtk.SeparatorMenuItem())
-		self.editMenu.append(self.preference)
-
-		self.changeSkin = gtk.MenuItem('Change Skin...')
-		self.showLyric = gtk.CheckMenuItem('Show Lyric')
-		self.showLyric.set_active(True)
-		self.viewMenu.append(self.showLyric)
-		self.viewMenu.append(gtk.SeparatorMenuItem())
-		self.viewMenu.append(self.changeSkin)
-
-		self.About = gtk.MenuItem('About...')
-		self.About.connect('activate', self.AboutInfo)
-		self.helpMenu.append(self.About)
-
-		self.mb.append(self.File)
-		self.mb.append(self.Edit)
-		self.mb.append(self.View)
-		self.mb.append(self.Help)
-
-	def createButton(self):
-		# Creating Buttons
-		self.nextButton = gtk.Button('Next')
-		self.nextButton.connect('clicked', sendSignal, "NEXT")
-		self.prevButton = gtk.Button('Prev')
-		self.prevButton.connect('clicked', sendSignal, "PREV")
-		self.pauseButton = gtk.Button('Pause')
-		self.pauseButton.connect('clicked', sendSignal, "PAUSE")
-
-	def Packing(self):
-		self.globalBox = gtk.VBox(False, 10)
-		self.buttonAlign = gtk.Alignment(0, 0, 0, 0)
-		self.tmpAlign = gtk.Alignment(0, 1, 0, 0)
-
-		self.globalBox.pack_start(self.mb, False, False, 0)
-		self.globalBox.pack_start(self.buttonAlign)
-		self.globalBox.pack_start(self.tmpAlign, True, True, 0)
-
-		self.tmpHBox = gtk.HBox(True, 2)
-		self.tmpHBox.pack_start(self.prevButton, True, True, 5)
-		self.tmpHBox.pack_start(self.pauseButton, True, True, 5)
-		self.tmpHBox.pack_start(self.nextButton, True, True, 5)
-		self.buttonAlign.add(self.tmpHBox)
+	def setSpecialWidget(self):
+		self.builder.get_object('scale').set_value_pos(1.0)
+		self.builder.get_object('timeLabel').set_text("0:00/3:28")
+		GObject.timeout_add(1000, self.setTime)
 
 	def __init__(self):
-		self.initWindow()
-		self.createMenu()
-		self.createButton()
-		self.Packing()
+		# analyze the XML file
+		self.builder = Gtk.Builder()
+		self.builder.add_from_file('interface.glade')
 
-		self.window.add(self.globalBox)
+		self.nowTimeSec = 0
+		self.nowTimeMin = 0
+
+		self.setSpecialCalls()
+		self.setSpecialWidget()
+		self.builder.connect_signals(InterfaceHandler())
+
+		self.window = self.builder.get_object('MainWindow')
 		self.window.show_all()
 
 def run():
-	gtk.main()
+	Gtk.main()
 
 if __name__ == "__main__":
-	mainWindow = MainWindow()
+	playList = PlayList()
+	Socket = _Socket()
+	interface = MainInterface()
 	run()
 
