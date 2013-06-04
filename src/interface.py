@@ -3,8 +3,11 @@
 
 import socket
 import time
+import sys
+import os
 from gi.repository import GObject
 from gi.repository import Gtk
+socket_addr = '/tmp/melodia-socket'
 
 class _Song:
 	def __init__(self, info):
@@ -28,8 +31,21 @@ class PlayList:
 		return self.List.pop(0)
 
 class _Socket:
-	def Send(data):
-		print data
+	def __init__(self):
+		self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		try:
+			self.sock.connect(socket_addr)
+		except socket.error:
+			os.system('melodia-daemon &')
+			self.sock.connect(socket_addr)
+	def __del__(self):
+		self.sock.close()
+	def send(self, data):
+		self.sock.send(data)
+	def recv(self):
+		return self.sock.recv(4096)
+	def nonblocking(self):
+		self.sock.setblocking(0)
 
 class InterfaceHandler:
 	def closeAll(self, *res):
@@ -64,10 +80,12 @@ class InterfaceHandler:
 			interface.getObject('Pause').set_label('Resume')
 			interface.getObject('Pause').disconnect(interface.pauseSig)
 			interface.resumeSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "RESUME")
+			interface.sock.send('PAUSE')
 		if data == "RESUME":
 			interface.getObject('Pause').set_label('Pause')
 			interface.getObject('Pause').disconnect(interface.resumeSig)
 			interface.pauseSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
+			interface.sock.send('RESUME')
 		print "Received a %s signal." % (data)
 
 class MainInterface:
@@ -81,33 +99,44 @@ class MainInterface:
 		self.getObject('Next').connect('clicked', InterfaceHandler().connectServer, "NEXT")
 
 	def showTime(self):
-		self.getObject('timeLabel').set_text("%d:%02d/%d:%02d"%(self.nowTimeMin, self.nowTimeSec, self.totTimeMin, self.totTimeSec))
+		self.getObject('timeLabel').set_text("%d:%02d/%d:%02d" % (self.nowTime / 60, self.nowTime % 60, self.totalTime / 60, self.totalTime % 60))
+		if self.totalTime: self.getObject('scale').set_value(self.nowTime * 100.0 / self.totalTime)
+		else: self.getObject('scale').set_value(0)
 
 	def setTime(self):
-		self.nowTimeSec += 1
-		if self.nowTimeSec == 60:
-			self.nowTimeSec = 1
-			self.nowTimeMin += 1
-		tmp = (self.nowTimeMin * 60.0 + self.nowTimeSec) / (self.totTimeMin * 60.0 + self.totTimeSec) * 100.0
-		self.getObject('scale').set_value(tmp)
-		self.showTime()
-		return True
+		flag = True
+		try:
+			info = self.sock.recv().split('\0')[:-1]
+			for msg in info:
+				if msg == 'QUIT':
+					self.nowTime = 0
+					self.totalTime = 0
+					flag = False
+				else:
+					self.nowTime = int(msg)
+			self.showTime()
+		except socket.error: pass
+		return flag
 
 	def setSpecialWidget(self):
 		self.showTime()
-		self.getObject('scale').set_sensitive(False)
-		self.getObject('Stop').set_sensitive(False)
-		GObject.timeout_add(950, self.setTime)
+		GObject.timeout_add(100, self.setTime)
 
 	def __init__(self):
 		# analyze the XML file
 		self.builder = Gtk.Builder()
 		self.builder.add_from_file('interface.glade')
 
-		self.nowTimeSec = 0
-		self.nowTimeMin = 0
-		self.totTimeSec = 28
-		self.totTimeMin = 3
+		self.nowTime = 0
+
+		self.sock = _Socket()
+		self.sock.send(sys.argv[1])
+		self.sock.recv()
+		self.sock.send(str(os.path.getsize(sys.argv[1])))
+		info = self.sock.recv()
+		self.totalTime = int(info.split('\1')[0])
+		self.sock.send('START')
+		self.sock.nonblocking()
 
 		self.setSpecialCalls()
 		self.setSpecialWidget()
@@ -121,7 +150,6 @@ def run():
 
 if __name__ == "__main__":
 	playList = PlayList()
-	Socket = _Socket()
 	interface = MainInterface()
 	run()
 

@@ -329,6 +329,9 @@ int handle(int fd) {
 	if (is->file->fp == NULL)
 		return -1;
 
+	sprintf(socket_buf, "SIZE");
+	write(fd, socket_buf, strlen(socket_buf));
+
 	if ((nbytes = read(fd, socket_buf, 100)) < 0)
 		return -1;
 	socket_buf[nbytes] = 0;
@@ -410,7 +413,10 @@ int handle(int fd) {
 	while (item = av_dict_get(is->format_ctx->metadata, "", item, AV_DICT_IGNORE_SUFFIX))
 		if (strcmp(item->key, "artist") == 0 || strcmp(item->key, "album") == 0 || strcmp(item->key, "title") == 0)
 			pos += sprintf(pos, "\1%s\2%s", item->key, item->value);
-	write(fd, socket_buf, pos - socket_buf);
+	write(fd, socket_buf, pos - socket_buf + 1);
+
+	if (read(fd, socket_buf, 100) < 0)
+		return -1;
 
 	int seconds = 0;
 	av_usleep(0.01 * 1000000);
@@ -419,12 +425,12 @@ int handle(int fd) {
 		if (! is->buffering && is->audioq.size == 0 && is->file->pos < is->file->filesize) {
 			is->buffering = 1;
 			strcpy(socket_buf, "BUFFERING");
-			write(fd, socket_buf, strlen(socket_buf));
+			write(fd, socket_buf, strlen(socket_buf) + 1);
 		}
 		if (is->audioq.size > 0 && is->buffering) {
 			is->buffering = 0;
 			strcpy(socket_buf, "RESUME");
-			write(fd, socket_buf, strlen(socket_buf));
+			write(fd, socket_buf, strlen(socket_buf) + 1);
 		}
 
 		if (! is->paused && ! is->buffering) {
@@ -433,7 +439,7 @@ int handle(int fd) {
 			if ((int) cur_clock > seconds) {
 				seconds = cur_clock;
 				sprintf(socket_buf, "%d", seconds);
-				write(fd, socket_buf, strlen(socket_buf));
+				write(fd, socket_buf, strlen(socket_buf) + 1);
 			}
 		}
 
@@ -442,7 +448,7 @@ int handle(int fd) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 0.01 * 1000000;
 		if (select(fd + 1, &readfds, NULL, NULL, &timeout) > 0) {
-			if ((nbytes = read(fd, socket_buf, 100)) < 0)
+			if ((nbytes = read(fd, socket_buf, 100)) <= 0)
 				is->quit = 1;
 			else {
 				socket_buf[nbytes] = 0;
@@ -454,7 +460,7 @@ int handle(int fd) {
 	}
 
 	strcpy(socket_buf, "QUIT");
-	write(fd, socket_buf, strlen(socket_buf));
+	write(fd, socket_buf, strlen(socket_buf) + 1);
 
 	is->quit = 1;
 	is->audioq.quit = 1;
