@@ -413,7 +413,7 @@ int handle(int fd) {
 	while (item = av_dict_get(is->format_ctx->metadata, "", item, AV_DICT_IGNORE_SUFFIX))
 		if (strcmp(item->key, "artist") == 0 || strcmp(item->key, "album") == 0 || strcmp(item->key, "title") == 0)
 			pos += sprintf(pos, "\1%s\2%s", item->key, item->value);
-	write(fd, socket_buf, pos - socket_buf + 1);
+	write(fd, socket_buf, pos - socket_buf);
 
 	if (read(fd, socket_buf, 100) < 0)
 		return -1;
