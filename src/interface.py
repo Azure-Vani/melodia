@@ -35,6 +35,7 @@ class _Socket:
 
 class InterfaceHandler:
 	def closeAll(self, *res):
+		interface.quit()
 		Gtk.main_quit()
 
 	def aboutDialog(self, *res):
@@ -118,6 +119,12 @@ class MainInterface:
 		self.totalTime = int(info.split('\1')[0])
 		self.sock.send('START')
 		self.sock.nonblocking()
+
+	def quit(self):
+		try: del self.sock
+		except: pass
+		try: self.playlist.quit()
+		except: pass
 
 	def setSpecialWidget(self):
 		self.showTime()
