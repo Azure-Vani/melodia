@@ -10,6 +10,7 @@ AM_INIT_AUTOMAKE([foreign])
 
 # Checks for programs.
 AC_PROG_CC
+AC_PATH_PROG([PYTHON], [python2], AC_MSG_ERROR([python 2.x not found]))
 
 # Checks for libraries.
 SDL_VERSION=1.2.0

@@ -1,10 +1,11 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # -*- encoding: utf-8 -*-
 
 import socket
 import time
 import sys
 import os
+from playlist import PlayList
 from gi.repository import GObject
 from gi.repository import Gtk
 socket_addr = '/tmp/melodia-socket'
@@ -14,21 +15,6 @@ class _Song:
 		self.totalTime = info["time"]
 		self.artist = info["artist"]
 		self.album = info["album"]
-
-class PlayList:
-	def __init__(self):
-		self.List = []
-		self.SHUFFLE = 1
-		self.LOOP = 0
-		self.palyType = self.LOOP
-	
-	def append(self, data):
-		self.List.append(data)
-		# debug
-		print "Current play list is", self.List
-
-	def getNext(self):
-		return self.List.pop(0)
 
 class _Socket:
 	def __init__(self):
@@ -49,6 +35,7 @@ class _Socket:
 
 class InterfaceHandler:
 	def closeAll(self, *res):
+		interface.quit()
 		Gtk.main_quit()
 
 	def aboutDialog(self, *res):
@@ -86,6 +73,8 @@ class InterfaceHandler:
 			interface.getObject('Pause').disconnect(interface.resumeSig)
 			interface.pauseSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
 			interface.sock.send('RESUME')
+		if data == "NEXT":
+			interface.start()
 		print "Received a %s signal." % (data)
 
 class MainInterface:
@@ -104,19 +93,38 @@ class MainInterface:
 		else: self.getObject('scale').set_value(0)
 
 	def setTime(self):
-		flag = True
 		try:
 			info = self.sock.recv().split('\0')[:-1]
 			for msg in info:
 				if msg == 'QUIT':
-					self.nowTime = 0
-					self.totalTime = 0
-					flag = False
+					self.start()
 				else:
 					self.nowTime = int(msg)
 			self.showTime()
-		except socket.error: pass
-		return flag
+		except: pass
+		return True
+
+	def start(self):
+		try: del self.sock
+		except: pass
+
+		self.nowTime = 0
+		(addr, size) = self.playlist.getNext()
+
+		self.sock = _Socket()
+		self.sock.send(addr)
+		self.sock.recv()
+		self.sock.send(str(size))
+		info = self.sock.recv()
+		self.totalTime = int(info.split('\1')[0])
+		self.sock.send('START')
+		self.sock.nonblocking()
+
+	def quit(self):
+		try: del self.sock
+		except: pass
+		try: self.playlist.quit()
+		except: pass
 
 	def setSpecialWidget(self):
 		self.showTime()
@@ -127,20 +135,14 @@ class MainInterface:
 		self.builder = Gtk.Builder()
 		self.builder.add_from_file('interface.glade')
 
-		self.nowTime = 0
-
-		self.sock = _Socket()
-		self.sock.send(sys.argv[1])
-		self.sock.recv()
-		self.sock.send(str(os.path.getsize(sys.argv[1])))
-		info = self.sock.recv()
-		self.totalTime = int(info.split('\1')[0])
-		self.sock.send('START')
-		self.sock.nonblocking()
+		self.nowTime = self.totalTime = 0
 
 		self.setSpecialCalls()
 		self.setSpecialWidget()
 		self.builder.connect_signals(InterfaceHandler())
+
+		self.playlist = PlayList()
+		self.start()
 
 		self.window = self.getObject('MainWindow')
 		self.window.show_all()
@@ -149,7 +151,6 @@ def run():
 	Gtk.main()
 
 if __name__ == "__main__":
-	playList = PlayList()
 	interface = MainInterface()
 	run()
 
