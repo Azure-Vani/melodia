@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
   <!-- interface-requires gtk+ 3.6 -->
+  <object class="GtkAdjustment" id="adjustment">
+    <property name="upper">100.01000000000001</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
   <object class="GtkWindow" id="MainWindow">
     <property name="width_request">500</property>
     <property name="height_request">70</property>
@@ -199,7 +204,6 @@
                   <object class="GtkBox" id="buttonBox">
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
-                    <property name="homogeneous">True</property>
                     <child>
                       <object class="GtkButton" id="Prev">
                         <property name="label" translatable="yes">Prev</property>
@@ -217,13 +221,14 @@
                     <child>
                       <object class="GtkButton" id="Pause">
                         <property name="label" translatable="yes">Pause</property>
+                        <property name="width_request">50</property>
                         <property name="visible">True</property>
                         <property name="can_focus">True</property>
                         <property name="receives_default">True</property>
                       </object>
                       <packing>
                         <property name="expand">False</property>
-                        <property name="fill">True</property>
+                        <property name="fill">False</property>
                         <property name="padding">3</property>
                         <property name="position">1</property>
                       </packing>
@@ -303,23 +308,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <child>
-                              <object class="GtkLabel" id="playStatus">
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="xalign">0</property>
-                                <property name="yalign">1</property>
-                                <property name="xpad">10</property>
-                                <property name="ypad">2</property>
-                                <property name="label" translatable="yes">stop</property>
-                                <attributes>
-                                  <attribute name="size" value="9000"/>
-                                </attributes>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                                <property name="position">0</property>
-                              </packing>
+                              <placeholder/>
                             </child>
                             <child>
                               <object class="GtkLabel" id="timeLabel">
@@ -397,10 +386,5 @@ audio-volume-medium</property>
         </child>
       </object>
     </child>
-  </object>
-  <object class="GtkAdjustment" id="adjustment">
-    <property name="upper">100.01000000000001</property>
-    <property name="step_increment">1</property>
-    <property name="page_increment">10</property>
   </object>
 </interface>
