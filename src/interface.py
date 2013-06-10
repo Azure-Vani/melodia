@@ -67,11 +67,13 @@ class InterfaceHandler:
 			interface.getObject('Pause').set_label('Resume')
 			interface.getObject('Pause').disconnect(interface.pauseSig)
 			interface.resumeSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "RESUME")
+			interface.paused = True
 			interface.sock.send('PAUSE')
 		if data == "RESUME":
 			interface.getObject('Pause').set_label('Pause')
 			interface.getObject('Pause').disconnect(interface.resumeSig)
 			interface.pauseSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
+			interface.paused = False
 			interface.sock.send('RESUME')
 		if data == "NEXT":
 			interface.start()
@@ -98,6 +100,10 @@ class MainInterface:
 			for msg in info:
 				if msg == 'QUIT':
 					self.start()
+				elif msg == 'BUFFERING':
+					self.buffering = True
+				elif msg == 'RESUME':
+					self.buffering = False
 				else:
 					self.nowTime = int(msg)
 			self.showTime()
@@ -110,6 +116,7 @@ class MainInterface:
 
 		self.nowTime = 0
 		(addr, size) = self.playlist.getNext()
+		self.paused = self.buffering = False
 
 		self.sock = _Socket()
 		self.sock.send(addr)
@@ -136,6 +143,7 @@ class MainInterface:
 		self.builder.add_from_file('interface.glade')
 
 		self.nowTime = self.totalTime = 0
+		self.paused = self.buffering = False
 
 		self.setSpecialCalls()
 		self.setSpecialWidget()

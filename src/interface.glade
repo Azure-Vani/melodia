@@ -207,6 +207,7 @@
                     <child>
                       <object class="GtkButton" id="Prev">
                         <property name="label" translatable="yes">Prev</property>
+                        <property name="width_request">50</property>
                         <property name="visible">True</property>
                         <property name="can_focus">True</property>
                         <property name="receives_default">True</property>
@@ -221,7 +222,7 @@
                     <child>
                       <object class="GtkButton" id="Pause">
                         <property name="label" translatable="yes">Pause</property>
-                        <property name="width_request">50</property>
+                        <property name="width_request">70</property>
                         <property name="visible">True</property>
                         <property name="can_focus">True</property>
                         <property name="receives_default">True</property>
@@ -236,6 +237,7 @@
                     <child>
                       <object class="GtkButton" id="Stop">
                         <property name="label" translatable="yes">Stop</property>
+                        <property name="width_request">50</property>
                         <property name="visible">True</property>
                         <property name="can_focus">True</property>
                         <property name="receives_default">True</property>
@@ -250,6 +252,7 @@
                     <child>
                       <object class="GtkButton" id="Next">
                         <property name="label" translatable="yes">Next</property>
+                        <property name="width_request">50</property>
                         <property name="visible">True</property>
                         <property name="can_focus">True</property>
                         <property name="receives_default">True</property>
