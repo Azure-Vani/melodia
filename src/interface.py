@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/env python2
 # -*- encoding: utf-8 -*-
 
 import socket
@@ -34,8 +34,11 @@ class _Socket:
 		self.sock.setblocking(0)
 
 class InterfaceHandler:
+	def __init__(self, quitfunc):
+		self.quitfunc = quitfunc
+
 	def closeAll(self, *res):
-		interface.quit()
+		self.quitfunc()
 		Gtk.main_quit()
 
 	def aboutDialog(self, *res):
@@ -60,39 +63,56 @@ class InterfaceHandler:
 			fileName = fileDialog.get_filename()
 			playList.append(fileName)
 		fileDialog.destroy()
-	
-	def connectServer(self, widget, data):
-		global interface
-		if data == "PAUSE":
-			interface.getObject('Pause').set_label('Resume')
-			interface.getObject('Pause').disconnect(interface.pauseSig)
-			interface.resumeSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "RESUME")
-			interface.paused = True
-			interface.sock.send('PAUSE')
-		if data == "RESUME":
-			interface.getObject('Pause').set_label('Pause')
-			interface.getObject('Pause').disconnect(interface.resumeSig)
-			interface.pauseSig = interface.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
-			interface.paused = False
-			interface.sock.send('RESUME')
-		if data == "NEXT":
-			interface.start()
-		print "Received a %s signal." % (data)
 
-class MainInterface:
+class Interface:
+	def __init__(self):
+		# analyze the XML file
+		self.builder = Gtk.Builder()
+		self.builder.add_from_file('interface.glade')
+
 	def getObject(self, data):
 		return self.builder.get_object(data)
 
-	def setSpecialCalls(self):
-		self.getObject('Prev').connect('clicked', InterfaceHandler().connectServer, "PREV")
-		self.pauseSig = self.getObject('Pause').connect('clicked', InterfaceHandler().connectServer, "PAUSE")
-		self.getObject('Stop').connect('clicked', InterfaceHandler().connectServer, "STOP")
-		self.getObject('Next').connect('clicked', InterfaceHandler().connectServer, "NEXT")
+	def start(self):
+		self.window = self.getObject('MainWindow')
+		self.window.show_all()
 
-	def showTime(self):
-		self.getObject('timeLabel').set_text("%d:%02d/%d:%02d" % (self.nowTime / 60, self.nowTime % 60, self.totalTime / 60, self.totalTime % 60))
-		if self.totalTime: self.getObject('scale').set_value(self.nowTime * 100.0 / self.totalTime)
+	def actionHandler(self, data):
+		if data == "PAUSE":
+			label = self.getObject('Pause').get_label()
+			if label == 'Pause':
+				self.getObject('Pause').set_label('Resume')
+			else:
+				self.getObject('Pause').set_label('Pause')
+
+	def setSpecialCalls(self, func, quitfunc):
+		self.getObject('Prev').connect('clicked', func, "PREV")
+		self.pauseSig = self.getObject('Pause').connect('clicked', func, "PAUSE")
+		self.getObject('Stop').connect('clicked', func, "STOP")
+		self.getObject('Next').connect('clicked', func, "NEXT")
+		self.builder.connect_signals(InterfaceHandler(quitfunc))
+
+	def connectSignals(self, handler):
+		self.builder.connect_signals(handler)
+
+	def showTime(self, nowTime, totalTime):
+		self.getObject('timeLabel').set_text("%d:%02d/%d:%02d" % (nowTime / 60, nowTime % 60, totalTime / 60, totalTime % 60))
+		if totalTime: self.getObject('scale').set_value(nowTime * 100.0 / totalTime)
 		else: self.getObject('scale').set_value(0)
+
+class MainController:
+	def connectServer(self, widget, data):
+		self.interface.actionHandler(data)
+		if data == "PAUSE":
+			if self.paused:
+				self.paused = False
+				self.sock.send('RESUME')
+			else:
+				self.paused = True
+				self.sock.send('PAUSE')
+		if data == "NEXT":
+			self.start()
+		print "Received a %s signal." % (data)
 
 	def setTime(self):
 		try:
@@ -106,7 +126,7 @@ class MainInterface:
 					self.buffering = False
 				else:
 					self.nowTime = int(msg)
-			self.showTime()
+			self.interface.showTime(self.nowTime, self.totalTime)
 		except: pass
 		return True
 
@@ -134,31 +154,27 @@ class MainInterface:
 		except: pass
 
 	def setSpecialWidget(self):
-		self.showTime()
+		self.interface.showTime(self.nowTime, self.totalTime)
 		GObject.timeout_add(100, self.setTime)
 
 	def __init__(self):
-		# analyze the XML file
-		self.builder = Gtk.Builder()
-		self.builder.add_from_file('interface.glade')
+		self.interface = Interface()
 
 		self.nowTime = self.totalTime = 0
 		self.paused = self.buffering = False
 
-		self.setSpecialCalls()
+		self.interface.setSpecialCalls(self.connectServer, self.quit)
 		self.setSpecialWidget()
-		self.builder.connect_signals(InterfaceHandler())
 
 		self.playlist = PlayList()
+		self.interface.start()
 		self.start()
 
-		self.window = self.getObject('MainWindow')
-		self.window.show_all()
 
 def run():
 	Gtk.main()
 
 if __name__ == "__main__":
-	interface = MainInterface()
+	controller = MainController()
 	run()
 
