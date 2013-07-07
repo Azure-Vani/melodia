@@ -111,32 +111,44 @@ class MainController:
 				self.paused = True
 				self.sock.send('PAUSE')
 		if data == "NEXT":
-			self.start()
+			self.switch()
 		print "Received a %s signal." % (data)
 
-	def setTime(self):
-		try:
-			info = self.sock.recv().split('\0')[:-1]
-			for msg in info:
-				if msg == 'QUIT':
-					self.start()
-				elif msg == 'BUFFERING':
-					self.buffering = True
-				elif msg == 'RESUME':
-					self.buffering = False
-				else:
-					self.nowTime = int(msg)
-			self.interface.showTime(self.nowTime, self.totalTime)
-		except: pass
+	def eventLoop(self):
+		if self.evt:
+			func = self.evt.pop(0)
+			func[0](*func[1])
+
+		if self.started:
+			try:
+				info = self.sock.recv().split('\0')[:-1]
+				for msg in info:
+					if msg == 'QUIT':
+						self.switch()
+					elif msg == 'BUFFERING':
+						self.buffering = True
+					elif msg == 'RESUME':
+						self.buffering = False
+					else:
+						self.nowTime = int(msg)
+				self.interface.showTime(self.nowTime, self.totalTime)
+			except: pass
+
 		return True
 
-	def start(self):
-		try: del self.sock
-		except: pass
+	def switch(self):
+		if self.started:
+			try: del self.sock
+			except: pass
 
-		self.nowTime = 0
-		(addr, size) = self.playlist.getNext()
+			self.nowTime = self.totalTime = 0
+			self.started = False
+		self.evt = []
+		self.playlist.getNext(self.evt, (self.start, ()))
+
+	def start(self, addr, size):
 		self.paused = self.buffering = False
+		self.started = True
 
 		self.sock = _Socket()
 		self.sock.send(addr)
@@ -153,22 +165,20 @@ class MainController:
 		try: self.playlist.quit()
 		except: pass
 
-	def setSpecialWidget(self):
-		self.interface.showTime(self.nowTime, self.totalTime)
-		GObject.timeout_add(100, self.setTime)
-
 	def __init__(self):
 		self.interface = Interface()
 
 		self.nowTime = self.totalTime = 0
 		self.paused = self.buffering = False
 
-		self.interface.setSpecialCalls(self.connectServer, self.quit)
-		self.setSpecialWidget()
-
 		self.playlist = PlayList()
+		self.started = False
+		self.evt = []
+
+		self.interface.setSpecialCalls(self.connectServer, self.quit)
+		GObject.timeout_add(10, self.eventLoop)
+		self.switch()
 		self.interface.start()
-		self.start()
 
 
 def run():
