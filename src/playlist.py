@@ -95,10 +95,6 @@ class PlayList:
 	def getNext(self, evt, startfunc):
 		self.evt = evt
 		self.startfunc = startfunc
-		try:
-			if self.proc.is_alive(): self.proc.terminate()
-			else: self.proc.join()
-		except: pass
 		try: self.fp.close()
 		except: pass
 		if not self.playlist:
@@ -108,7 +104,4 @@ class PlayList:
 			self.getPlayList(None)
 
 	def quit(self):
-		try:
-			if self.proc.is_alive(): self.proc.terminate()
-			else: self.proc.join()
-		except: pass
+		pass

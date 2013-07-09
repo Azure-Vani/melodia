@@ -2,7 +2,7 @@ import socket, httplib, StringIO
 
 class AsyncSocketFileObject:
 	def __init__(self, sock):
-		self._sock = sock
+		self._sock = sock._sock
 		self._buffer = ''
 
 	def read(self, amt):
@@ -158,6 +158,6 @@ class AsyncHTTPConnection(httplib.HTTPConnection):
 
 		if response.will_close:
 			self._HTTPConnection__response = None
-			#self.close()
+			self.close()
 
 		return response
