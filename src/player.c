@@ -263,6 +263,7 @@ int read_thread(void *arg) {
 				break;
 			} else if (is->format_ctx->pb && is->format_ctx->pb->error) {
 				is->error = 1;
+				break;
 			} else {
 				av_usleep(0.01 * 1000000);
 				continue;
@@ -472,6 +473,7 @@ int main() {
 	signal(SIGINT, sigterm_handler);
 	signal(SIGTERM, sigterm_handler);
 	signal(SIGCHLD, sigchld_handler);
+	signal(SIGPIPE, SIG_IGN);
 
 	int client;
 
@@ -479,7 +481,8 @@ int main() {
 		if (fork() == 0) {
 			handle(client);
 			return 0;
-		}
+		} else
+			close(client);
 
 	return 0;
 }

@@ -67,7 +67,9 @@ class MainController:
 
 	def switch(self):
 		if self.started:
-			try: del self.sock
+			try:
+				self.sock.send('QUIT')
+				del self.sock
 			except: pass
 
 			self.nowTime = self.totalTime = 0
