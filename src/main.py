@@ -48,11 +48,6 @@ class MainController:
 		print "Received a %s signal." % (data)
 
 	def eventLoop(self):
-		l = len(self.evt)
-		for i in range(0, l):
-			func = self.evt.pop(0)
-			func[0](*func[1])
-
 		if self.started:
 			try:
 				info = self.sock.recv().split('\0')[:-1]
@@ -61,8 +56,10 @@ class MainController:
 						self.switch()
 					elif msg == 'BUFFERING':
 						self.buffering = True
+						print 'buffering'
 					elif msg == 'RESUME':
 						self.buffering = False
+						print 'resume'
 					else:
 						self.nowTime = int(msg)
 				self.interface.showTime(self.nowTime, self.totalTime)
@@ -77,17 +74,14 @@ class MainController:
 
 			self.nowTime = self.totalTime = 0
 			self.started = False
-		self.evt = []
-		self.playlist.getNext(self.evt, (self.start, ()))
+		self.start(self.playlist.getNext())
 
-	def start(self, addr, size):
+	def start(self, addr):
 		self.paused = self.buffering = False
 		self.started = True
 
 		self.sock = _Socket()
 		self.sock.send(addr)
-		self.sock.recv()
-		self.sock.send(str(size))
 		info = self.sock.recv()
 		self.totalTime = int(info.split('\1')[0])
 		self.sock.send('START')
@@ -107,7 +101,6 @@ class MainController:
 
 		self.playlist = PlayList()
 		self.started = False
-		self.evt = []
 
 		self.interface.setSpecialCalls(self.connectServer, self.quit)
 		GObject.timeout_add(10, self.eventLoop)

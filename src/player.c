@@ -18,6 +18,7 @@
 #include <sys/wait.h>
 
 #define SDL_AUDIO_BUFFER_SIZE 1024
+#define MAX_AUDIO_FRAME_SIZE 192000
 
 typedef struct PacketQueue {
 	AVPacketList *first_pkt, *last_pkt;
@@ -35,11 +36,6 @@ typedef struct AudioParams {
 	enum AVSampleFormat fmt;
 } AudioParams;
 
-typedef struct File {
-	FILE *fp;
-	long long filesize, pos;
-} File;
-
 typedef struct State {
 	int audioStream;
 	PacketQueue audioq;
@@ -50,17 +46,18 @@ typedef struct State {
 	AVPacket audio_pkt, audio_pkt1;
 	AVFrame audio_frame1;
 	struct SwrContext *swr_ctx;
-	uint8_t audio_buf[(AVCODEC_MAX_AUDIO_FRAME_SIZE * 3) / 2];
+	uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
 	unsigned int audio_buf_size;
 	unsigned int audio_buf_index;
 	uint8_t *audio_buf1;
 	unsigned int audio_buf1_size;
 	double audio_clock;
 	double audio_clock_drift;
-	File *file;
+	//File *file;
 	int paused;
 	int quit;
 	int buffering;
+	int error;
 } State;
 
 const char *socket_addr = "/tmp/melodia-socket";
@@ -246,19 +243,6 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
 	is->audio_clock_drift = is->audio_clock - now;
 }
 
-int readfunc(void *ptr, uint8_t *buf, int bufsize) {
-	File *file = ptr;
-	size_t num = fread(buf, 1, bufsize, file->fp);
-	file->pos += num;
-	return num;
-}
-
-int64_t seekfunc(void *ptr, int64_t pos, int whence) {
-	File *file = ptr;
-	if (whence == AVSEEK_SIZE) return file->filesize;
-	else return -1;
-}
-
 int read_thread(void *arg) {
 	AVPacket packet;
 	State *is = arg;
@@ -275,9 +259,12 @@ int read_thread(void *arg) {
 
 		ret = av_read_frame(is->format_ctx, &packet);
 		if (ret < 0) {
-			if (is->file->pos == is->file->filesize)
+			if (ret == AVERROR_EOF || url_feof(is->format_ctx->pb)) {
+				is->quit = 1;
 				break;
-			else {
+			} else if (is->format_ctx->pb && is->format_ctx->pb->error) {
+				is->error = 1;
+			} else {
 				av_usleep(0.01 * 1000000);
 				continue;
 			}
@@ -315,6 +302,7 @@ int handle(int fd) {
 
 	// Register all formats and codecs
 	av_register_all();
+	avformat_network_init();
 
 	if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER)) {
 		fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
@@ -324,34 +312,12 @@ int handle(int fd) {
 	if ((nbytes = read(fd, socket_buf, 100)) < 0)
 		return -1;
 	socket_buf[nbytes] = 0;
-	is->file = malloc(sizeof(File));
-	is->file->fp = fopen(socket_buf, "r");
-	if (is->file->fp == NULL)
-		return -1;
 
-	sprintf(socket_buf, "SIZE");
-	write(fd, socket_buf, strlen(socket_buf));
-
-	if ((nbytes = read(fd, socket_buf, 100)) < 0)
-		return -1;
-	socket_buf[nbytes] = 0;
-	sscanf(socket_buf, "%lld", &is->file->filesize);
-	is->file->pos = 0;
-
-	io_ctx = avio_alloc_context(buf, bufsize, 0, is->file, readfunc, NULL, seekfunc);
+	//io_ctx = avio_alloc_context(buf, bufsize, 0, is->file, readfunc, NULL, seekfunc);
 	is->format_ctx = avformat_alloc_context();
 
-	probeData.buf = buf;
-	probeData.buf_size = bufsize;
-	probeData.filename = "";
-
-	is->format_ctx->pb = io_ctx;
-	is->format_ctx->iformat = av_probe_input_format(&probeData, 1);
-	is->format_ctx->flags = AVFMT_FLAG_CUSTOM_IO;
-
-	// Open video file
-	if (avformat_open_input(&is->format_ctx, "", NULL, NULL) != 0)
-		return -1; // Couldn't open file
+	if (avformat_open_input(&is->format_ctx, socket_buf, av_find_input_format(socket_buf), NULL) < 0)
+		return -1;
 
 	// Retrieve stream information
 	if (avformat_find_stream_info(is->format_ctx, NULL) < 0)
@@ -367,6 +333,7 @@ int handle(int fd) {
 
 	is->audio_st = is->format_ctx->streams[is->audioStream];
 	is->codec_ctx = is->format_ctx->streams[is->audioStream]->codec;
+
 	// Set audio settings from codec info
 	wanted_spec.freq = is->codec_ctx->sample_rate;
 	wanted_spec.format = AUDIO_S16SYS;
@@ -396,6 +363,7 @@ int handle(int fd) {
 		fprintf(stderr, "Unsupported codec!\n");
 		return -1;
 	}
+	is->codec_ctx->codec_id = codec->id;
 	int ret = avcodec_open2(is->codec_ctx, codec, NULL);
 
 	packet_queue_init(&is->audioq);
@@ -420,9 +388,9 @@ int handle(int fd) {
 
 	int seconds = 0;
 	av_usleep(0.01 * 1000000);
-	while (! is->quit) {
+	while (! is->quit && ! is->error) {
 
-		if (! is->buffering && is->audioq.size == 0 && is->file->pos < is->file->filesize) {
+		if (! is->buffering && is->audioq.size == 0) {
 			is->buffering = 1;
 			strcpy(socket_buf, "BUFFERING");
 			write(fd, socket_buf, strlen(socket_buf) + 1);
@@ -459,7 +427,10 @@ int handle(int fd) {
 		}
 	}
 
-	strcpy(socket_buf, "QUIT");
+	if (is->quit)
+		strcpy(socket_buf, "QUIT");
+	else
+		strcpy(socket_buf, "ERROR");
 	write(fd, socket_buf, strlen(socket_buf) + 1);
 
 	is->quit = 1;
@@ -477,9 +448,6 @@ int handle(int fd) {
 	SDL_DestroyCond(is->audioq.cond);
 	SDL_Quit();
 
-	// Close the video file
-	fclose(is->file->fp);
-	free(is->file);
 	avformat_close_input(&is->format_ctx);
 	swr_free(&is->swr_ctx);
 	if (is->audio_buf1) av_free(is->audio_buf1);
