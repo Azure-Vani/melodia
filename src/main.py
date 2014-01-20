@@ -52,14 +52,12 @@ class MainController:
 			try:
 				info = self.sock.recv().split('\0')[:-1]
 				for msg in info:
-					if msg == 'QUIT':
+					if msg == 'QUIT' or msg == 'ERROR':
 						self.switch()
 					elif msg == 'BUFFERING':
 						self.buffering = True
-						print 'buffering'
 					elif msg == 'RESUME':
 						self.buffering = False
-						print 'resume'
 					else:
 						self.nowTime = int(msg)
 				self.interface.showTime(self.nowTime, self.totalTime)

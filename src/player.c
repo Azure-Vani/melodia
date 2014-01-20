@@ -53,7 +53,6 @@ typedef struct State {
 	unsigned int audio_buf1_size;
 	double audio_clock;
 	double audio_clock_drift;
-	//File *file;
 	int paused;
 	int quit;
 	int buffering;
@@ -313,9 +312,7 @@ int handle(int fd) {
 		return -1;
 	socket_buf[nbytes] = 0;
 
-	//io_ctx = avio_alloc_context(buf, bufsize, 0, is->file, readfunc, NULL, seekfunc);
 	is->format_ctx = avformat_alloc_context();
-
 	if (avformat_open_input(&is->format_ctx, socket_buf, av_find_input_format(socket_buf), NULL) < 0)
 		return -1;
 
